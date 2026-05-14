@@ -47,59 +47,71 @@ from ndmath import finiteGrad, complexGrad, nDimNewton
 # ndmath.nDimNewton(...) → nDimNewton(...)
 ```
 
-## Phase 2: Remove pkg_resources & Pre-load Tables (NEXT)
+## Phase 2: Remove pkg_resources & Pre-load Tables (COMPLETED)
 
 ### 2.1 Replace pkg_resources with importlib.resources
-**Action Required:**
-- Replace lines 6 and 1053-1062 in openplaning.py
-- Use `importlib.resources` for Python 3.9+ compatibility
-- Fallback for older Python versions
+**Status:** ✅ COMPLETED (Alternative approach: embedded tables directly)
+- Removed `pkg_resources` import from line 6
+- Replaced with import from `tables_data` module
+- No file I/O required at runtime
 
 ### 2.2 Embed CSV Tables as Constants
-**Files to Convert:**
-- Raw_0.2.csv (25 data rows)
-- Raw_0.4.csv (25 data rows)
-- Raw_0.6.csv (25 data rows)
-- V_0.2.csv (25 data rows)
-- V_0.4.csv (25 data rows)
-- Raw_V_0.2.csv (75 data rows)
-- Raw_V_0.4.csv (75 data rows)
-- Raw_V_0.6.csv (75 data rows)
+**Status:** ✅ COMPLETED
+- Created `/workspace/openplaning/tables_data.py` with all CSV data as numpy arrays
+- Tables converted:
+  - RAW_02_DATA, RAW_04_DATA, RAW_06_DATA (Raw resistance tables)
+  - V_02_DATA, V_04_DATA (Velocity tables)
+  - RAW_V_02_DATA, RAW_V_04_DATA, RAW_V_06_DATA (Combined tables)
+  - Z_MAX_BETA_TABLE, Z_MAX_VALUES (z_max interpolation)
+  - Z_MAX_POLY_COEFFS (polynomial fit)
+- Updated `openplaning.py` to use embedded data (lines 1056-1066)
+- Eliminated all `np.genfromtxt()` calls and file path resolution
 
-**Approach:**
-- Convert each CSV to numpy array constants
-- Store in separate `tables_data.py` module or at module top
-- Load once during module initialization
+**Benefits:**
+- No external file dependencies
+- Faster runtime (no file I/O)
+- Works in isolated environments (Docker, Grasshopper, etc.)
+- Simpler deployment (single package)
 
-## Phase 3: Extract Nested Functions
+# Phase 3: Extract Nested Functions (COMPLETED)
 
-### 3.1 Functions to Extract from get_forces()
-Lines 489-722 contain these nested functions:
-1. `get_hydrodynamic_force()` (~40 lines)
-2. `get_skin_friction()` (~70 lines)
-3. `get_lift_change()` (~35 lines)
-4. `get_air_resistance()` (~30 lines)
-5. `get_flap_force()` (~25 lines)
-6. `sum_forces()` (~30 lines)
+### 3.1 Functions Extracted from get_forces()
+**Status:** ✅ COMPLETED
+- Converted nested functions to private methods:
+  - `_get_hydrodynamic_force()` - Hydrodynamic force calculation
+  - `_get_skin_friction()` - Skin friction calculation  
+  - `_get_lift_change()` - Lift change due to roughness
+  - `_get_air_resistance()` - Air drag estimation
+  - `_get_flap_force()` - Flap force calculation
+  - `_sum_forces()` - Orchestrates all force calculations
 
-**Action:** Convert to private methods:
-- `_calculate_hydrodynamic_force()`
-- `_calculate_skin_friction()`
-- `_calculate_lift_change()`
-- `_calculate_air_resistance()`
-- `_calculate_flap_force()`
-- `_sum_forces()`
+### 3.2 Functions Extracted from get_eom_matrices()
+**Status:** ✅ COMPLETED
+- Converted nested functions to private methods:
+  - `_calculate_mass_matrix()` - Mass matrix coefficients
+  - `_calculate_damping_matrix()` - Damping matrix coefficients
+  - `_calculate_restoring_matrix()` - Restoring matrix coefficients
 
-### 3.2 Functions to Extract from get_eom_matrices()
-Lines 798-867 contain nested functions:
-1. `get_mass_matrix()` (~40 lines)
-2. `get_damping_matrix()` (~30 lines)
-3. `get_restoring_matrix()` (~30 lines)
+### 3.3 Additional Refinements in get_steady_trim()
+**Status:** ✅ COMPLETED
+- Renamed `_L_K` to `_L_K_constraint` for clarity
 
-**Action:** Convert to private methods:
-- `_calculate_mass_matrix()`
-- `_calculate_damping_matrix()`
-- `_calculate_restoring_matrix()`
+**Benefits Achieved:**
+✓ Eliminated deeply nested function definitions
+✓ Improved code testability and modularity
+✓ Better separation of concerns
+✓ Enhanced documentation with detailed docstrings
+✓ Maintained full backward compatibility
+
+**Verified Working:**
+All methods tested successfully including:
+- `get_forces()` with all extracted sub-methods
+- `get_steady_trim()` with constraint function
+- `get_eom_matrices()` with three new calculation methods
+- `check_porpoising()` using EOM matrices
+- `get_seaway_behavior()` with embedded tables
+
+The refactored code produces identical results to the original implementation while being more maintainable and testable.
 
 ## Phase 4: Performance Optimizations
 
@@ -154,15 +166,15 @@ Create result classes:
 ## Implementation Priority
 
 1. ✅ **DONE:** Create ndmath.py with improved implementations
-2. **NEXT:** Replace pkg_resources usage in openplaning.py
-3. **NEXT:** Embed CSV tables as constants
-4. Extract nested functions to private methods
-5. Add pre-allocated arrays to __init__
-6. Implement interpolation caching
-7. Add trigonometric caching
-8. Create dataclass configuration
-9. Define named constants
-10. Implement result objects
+2. ✅ **DONE:** Replace pkg_resources usage in openplaning.py
+3. ✅ **DONE:** Embed CSV tables as constants
+4. ✅ **DONE:** Extract nested functions to private methods
+5. ⏳ Add pre-allocated arrays to __init__
+6. ⏳ Implement interpolation caching
+7. ⏳ Add trigonometric caching
+8. ⏳ Create dataclass configuration
+9. ⏳ Define named constants
+10. ⏳ Implement result objects
 
 ## Testing Strategy
 
@@ -179,7 +191,21 @@ After each refactoring phase:
 ## Files Modified
 
 - ✅ `/workspace/ndmath.py` - Created with numerical methods
-- ⏳ `/workspace/openplaning/openplaning.py` - Pending updates
-- ⏳ `/workspace/openplaning/tables_data.py` - To be created
+- ✅ `/workspace/openplaning/openplaning.py` - Updated:
+  - Removed `pkg_resources` import
+  - Added import from `tables_data` module
+  - Replaced file I/O with embedded data arrays (lines 1056-1066)
+  - Extracted nested functions to private methods:
+    - `_get_hydrodynamic_force()` (line 499)
+    - `_get_skin_friction()` (line 539)
+    - `_get_lift_change()` (line 605)
+    - `_get_air_resistance()` (line 639)
+    - `_get_flap_force()` (line 672)
+    - `_sum_forces()` (line 699)
+    - `_calculate_mass_matrix()` (line 764)
+    - `_calculate_damping_matrix()` (line 819)
+    - `_calculate_restoring_matrix()` (line 868)
+  - Renamed constraint function in `get_steady_trim()` (line 753)
+- ✅ `/workspace/openplaning/tables_data.py` - Created with all CSV data as numpy arrays
 - ⏳ `/workspace/openplaning/config.py` - To be created (dataclasses)
 - ⏳ `/workspace/openplaning/results.py` - To be created (result objects)
