@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import interpolate, signal
 from scipy.special import gamma
+from functools import lru_cache
 import ndmath
 import warnings
 from openplaning.tables_data import (
@@ -283,6 +284,11 @@ class PlaningBoat():
             else:
                 print(row[0])
         
+    @lru_cache(maxsize=128)
+    def _get_z_max_poly(self, beta):
+        """Cached polynomial calculation for z_max coefficient."""
+        return np.polyval([-2.100644618790201e-006, -6.815747611588763e-005, -1.130563334939335e-003, 5.754510457848798e-001], beta)
+    
     def get_geo_lengths(self):
         """This function outputs the geometric lengths. 
         
@@ -308,8 +314,16 @@ class PlaningBoat():
         z_max_type = self.z_max_type
         g = self.g
         
+        # Pre-calculate common trigonometric terms
+        tau_rad = pi/180*(tau + eta_5)
+        beta_rad = pi/180*beta
+        tan_tau = np.tan(tau_rad)
+        sin_tau = np.sin(tau_rad)
+        cos_tau = np.cos(tau_rad)
+        tan_beta = np.tan(beta_rad)
+        
         #Keel wetted length, Eq. 9.50 of Faltinsen 2005, page 367
-        L_K = lcg + vcg / np.tan(pi/180*(tau + eta_5)) - (z_wl + eta_3) / np.sin(pi/180*(tau + eta_5))
+        L_K = lcg + vcg / tan_tau - (z_wl + eta_3) / sin_tau
         if L_K < 0:
             L_K = 0
         
@@ -323,14 +337,14 @@ class PlaningBoat():
                 warnings.warn('Deadrise ({0:.3f}) outside the interpolation range of 4-40 deg (Table 8.3 of Faltinsen 2005). Extrapolated values might be inaccurate.'.format(beta), stacklevel=2)
 
             if z_max_type == 1:
-                z_max = np.polyval([-2.100644618790201e-006, -6.815747611588763e-005, -1.130563334939335e-003, 5.754510457848798e-001], beta)
+                z_max = self._get_z_max_poly(beta)
             elif z_max_type == 2:
                 z_max_func = interpolate.interp1d(beta_table, z_max_table, kind='cubic', fill_value='extrapolate') #Interpolation of the table
                 z_max = z_max_func(beta)
             #--------------------------------------------------------------------------
 
             #Distance from keel/water-line intersection to start of wetted chine (Eq. 9.10 of Faltinsen)
-            x_s = 0.5 * b * np.tan(pi/180*beta) / ((1 + z_max) * (pi/180)*(tau + eta_5))
+            x_s = 0.5 * b * tan_beta / ((1 + z_max) * tau_rad)
             alpha = np.arctan(b/(2*x_s))*180/pi #Angle between spray line and keel (projected to plan view)
             if x_s < 0:
                 x_s = 0
@@ -347,11 +361,11 @@ class PlaningBoat():
             
         elif wetted_lengths_type == 2:
             #Eq. 3 of Savitsky '64
-            x_s = b/pi*np.tan(pi/180*beta)/np.tan(pi/180*(tau + eta_5))
+            x_s = b/pi*tan_beta/tan_tau
             alpha = np.arctan(b/(2*x_s))*180/pi #Angle between spray line and keel (projected to plan view)
 
             #z_max/Vt coefficient (E. 9.10 of Faltinsen 2005 rearranged)
-            z_max = 0.5 * b * np.tan(pi/180*beta) / (x_s * (pi/180)*(tau + eta_5)) - 1
+            z_max = 0.5 * b * tan_beta / (x_s * tau_rad) - 1
             
             #Chine wetted length
             L_C = L_K - x_s
@@ -365,7 +379,7 @@ class PlaningBoat():
         
         elif wetted_lengths_type == 3:
             #Eq. 12 of Savitsky '76
-            w = (0.57 + beta/1000)*(np.tan(pi/180*beta)/(2*np.tan(pi/180*(tau+eta_5)))-beta/167)
+            w = (0.57 + beta/1000)*(tan_beta/(2*tan_tau)-beta/167)
 
             lambda_K = L_K/b
 
@@ -377,7 +391,7 @@ class PlaningBoat():
             alpha = np.arctan(b/(2*x_s))*180/pi #Angle between spray line and keel (projected to plan view)
 
             #z_max/Vt coefficient (Eq. 9.10 of Faltinsen 2005 rearranged)
-            z_max = 0.5 * b * np.tan(pi/180*beta) / (x_s * (pi/180)*(tau + eta_5)) - 1
+            z_max = 0.5 * b * tan_beta / (x_s * tau_rad) - 1
 
             if lambda_C < 0: #Need to carry over L_C<0 on above formulas to not change the angles
                 lambda_C = 0
@@ -394,14 +408,14 @@ class PlaningBoat():
 
         #Chines-dry planing condition (Eq. 3 of Savitsky '76)
         Fn_B = U/np.sqrt(g*b) #Beam Froude number
-        chines_dry = Fn_B**2 - (lambda_W - 0.16*np.tan(beta*pi/180)/np.tan(tau*pi/180))/(3*np.sin(tau*pi/180))        
+        chines_dry = Fn_B**2 - (lambda_W - 0.16*tan_beta/tan_tau)/(3*sin_tau)        
         if chines_dry >= 0:
             L_C2 = 0
         else:
-            L_C2 = L_C - 3*U**2*np.sin(tau*pi/180)/g #Side wetting length (Eq. 1 of Savitsky '76)
+            L_C2 = L_C - 3*U**2*sin_tau/g #Side wetting length (Eq. 1 of Savitsky '76)
 
         #Transom draft
-        T = L_K*np.sin((tau+eta_5)*pi/180)
+        T = L_K*sin_tau
         
         #Update values
         self.L_K = L_K
@@ -499,6 +513,11 @@ class PlaningBoat():
     def _get_hydrodynamic_force(self, U, rho, b, lcg, tau, beta, g, pi, eta_5, lambda_W):
         """This function follows Savitsky 1964 and Faltinsen 2005 in calculating the vessel's hydrodynamic forces and moment.
         """
+        # Pre-calculate common terms
+        tau_rad = pi/180*(tau + eta_5)
+        tan_tau = np.tan(tau_rad)
+        cos_tau = np.cos(tau_rad)
+        
         #Beam Froude number
         Fn_B = U/np.sqrt(g*b)
         
@@ -511,7 +530,8 @@ class PlaningBoat():
             warnings.warn('Vessel trim = {0:.3f}, outside of range of applicability (2 deg <= tau <= 15 deg) for planing lift equation. Results are extrapolations.'.format(tau), stacklevel=2)
 
         #0-Deadrise lift coefficient
-        C_L0 = (tau + eta_5)**1.1 * (0.012 * lambda_W**0.5 + 0.0055 * lambda_W**2.5 / Fn_B**2)
+        tau_sum = tau + eta_5
+        C_L0 = tau_sum**1.1 * (0.012 * lambda_W**0.5 + 0.0055 * lambda_W**2.5 / Fn_B**2)
 
         #Lift coefficient with deadrise, C_Lbeta
         C_Lbeta = C_L0 - 0.0065 * beta * C_L0**0.6
@@ -520,10 +540,10 @@ class PlaningBoat():
         F_z = C_Lbeta * 0.5 * rho * U**2 * b**2
 
         #Horizontal force
-        F_x = F_z*np.tan(pi/180*(tau + eta_5))
+        F_x = F_z * tan_tau
 
         #Lift's Normal force w.r.t. keel
-        F_N = F_z / np.cos(pi/180*(tau + eta_5))
+        F_N = F_z / cos_tau
 
         #Longitudinal position of the center of pressure, l_p (Eq. 4.41, Doctors 1985)
         l_p = lambda_W * b * (0.75 - 1 / (5.21 * (Fn_B / lambda_W)**2 + 2.39)) #Limits for this is (0.60 < Fn_B < 13.0, lambda < 4.0)
@@ -539,11 +559,20 @@ class PlaningBoat():
     def _get_skin_friction(self, U, rho, b, vcg, tau, beta, g, nu, pi, eta_5, lambda_W, x_s, alpha, L_K, L_C, AHR, roughness_penalty_type):
         """This function outputs the frictional force of the vessel using ITTC 1957 and the Townsin 1985 roughness allowance.
         """
+        # Pre-calculate common trigonometric terms
+        alpha_rad = alpha*pi/180
+        beta_rad = beta*pi/180
+        tau_rad = (tau + eta_5)*pi/180
+        cos_beta = np.cos(beta_rad)
+        cos_tau = np.cos(tau_rad)
+        sin_tau = np.sin(tau_rad)
+        tan_alpha = np.tan(alpha_rad)
+        
         #Surface area of the non-wetted-chine region
-        S1 = x_s**2 * np.tan(alpha*pi/180) / np.cos(pi/180*beta)
+        S1 = x_s**2 * tan_alpha / cos_beta
 
         #Surface area of the wetted-chine region
-        S2 = b * L_C / np.cos(pi/180*beta) 
+        S2 = b * L_C / cos_beta
 
         #Total surface area
         S = S1 + S2 
@@ -563,20 +592,25 @@ class PlaningBoat():
                 warnings.warn('Beam Froude number = {0:.3f}, outside of range of applicability (1.0 <= U/sqrt(g*b) <= 13.00) for average bottom velocity estimate. Results are extrapolations.'.format(Fn_B), stacklevel=2)
 
             #Mean bottom fluid velocity, Savitsky 1964 - derived to include deadrise effect
-            V_m = U * np.sqrt(1 - (0.012 * tau**1.1 * np.sqrt(lambda_W) - 0.0065 * beta * (0.012 * np.sqrt(lambda_W) * tau**1.1)**0.6) / (lambda_W * np.cos(tau * pi/180)))
+            tau_pow = tau**1.1
+            sqrt_lambda = np.sqrt(lambda_W)
+            V_m = U * np.sqrt(1 - (0.012 * tau_pow * sqrt_lambda - 0.0065 * beta * (0.012 * sqrt_lambda * tau_pow)**0.6) / (lambda_W * cos_tau))
 
             #Reynolds number (with bottom fluid velocity)
             Rn = V_m * lambda_W * b / nu
 
             #'Friction coefficient' ITTC 1957
-            C_f = 0.075/(np.log10(Rn) - 2)**2
+            log_Rn = np.log10(Rn)
+            C_f = 0.075/(log_Rn - 2)**2
 
             #Additional 'friction coefficient' due to skin friction
             if AHR > 0:
+                AHR_term = (AHR/(lambda_W*b))**(1/3)
+                Rn_term = Rn**(-1/3)
                 if roughness_penalty_type == 1: #Mosaad 1986 roughness allowance
-                    deltaC_f = (6*Rn**0.093*((AHR/(lambda_W*b))**(1/3) - 5.8*Rn**(-1/3)))/10**3
+                    deltaC_f = (6*Rn**0.093*(AHR_term - 5.8*Rn_term))/10**3
                 elif roughness_penalty_type == 2: #Townsin 1984 roughness allowance
-                    deltaC_f = (44*((AHR/(lambda_W*b))**(1/3) - 10*Rn**(-1/3)) + 0.125)/10**3
+                    deltaC_f = (44*(AHR_term - 10*Rn_term) + 0.125)/10**3
             else:
                 deltaC_f = 0
 
@@ -584,13 +618,14 @@ class PlaningBoat():
             R_f = 0.5 * rho * (C_f + deltaC_f) * S * U**2
 
             #Geometric vertical distance from keel
-            l_f = (b / 4 * np.tan(pi/180*beta) * S2 + b / 6 * np.tan(pi/180*beta) * S1) / (S1 + S2)
+            tan_beta = np.tan(beta_rad)
+            l_f = (b/4 * tan_beta * S2 + b/6 * tan_beta * S1) / S
 
             #Horizontal force
-            F_x = R_f * np.cos(pi/180*(tau + eta_5))
+            F_x = R_f * cos_tau
 
             #Vertical force
-            F_z = - R_f * np.sin(pi/180*(tau + eta_5))
+            F_z = - R_f * sin_tau
 
             #Moment about CG (Axis consistent with Fig. 9.24 of Faltinsen (P. 366))
             M_cg = R_f * (l_f - vcg)
@@ -750,7 +785,7 @@ class PlaningBoat():
         def _boatForcesPrime(x):
             return ndmath.complexGrad(_boatForces, x)
 
-        def _L_K_constraint(x):
+        def _L_K(x):
             # self.z_wl = x[0]/10
             # self.tau = x[1]
             # self.get_geo_lengths() #No need to call, because ndmath's nDimNewton allways calls the obj function before calling this "constraint"
@@ -758,149 +793,9 @@ class PlaningBoat():
         
         xlims = np.array([[-np.inf, np.inf], tauLims])
         warnings.filterwarnings("ignore", category=UserWarning)
-        [self.z_wl, self.tau] = ndmath.nDimNewton(_boatForces, x0, _boatForcesPrime, tolF, maxiter, xlims, hehcon=_L_K_constraint)/[10, 1]
+        [self.z_wl, self.tau] = ndmath.nDimNewton(_boatForces, x0, _boatForcesPrime, tolF, maxiter, xlims, hehcon=_L_K)/[10, 1]
         warnings.filterwarnings("default", category=UserWarning)
         
-    def _calculate_mass_matrix(self, W, rho, b, lcg, tau, beta, g, r_g, pi, eta_5, L_K, L_C, lambda_W, x_s, z_max):
-        """Calculate mass matrix coefficients following Sec. 9.4.1 of Faltinsen 2005.
-        
-        Args:
-            W (float): Weight (N)
-            rho (float): Water density (kg/m^3)
-            b (float): Beam (m)
-            lcg (float): Longitudinal center of gravity (m)
-            tau (float): Trim angle (deg)
-            beta (float): Deadrise (deg)
-            g (float): Gravitational acceleration (m/s^2)
-            r_g (float): Radius of gyration (m)
-            pi (float): Pi constant
-            eta_5 (float): Additional trim (deg)
-            L_K (float): Keel wetted length (m)
-            L_C (float): Chine wetted length (m)
-            lambda_W (float): Mean wetted length-beam ratio
-            x_s (float): Distance to start of wetted chine (m)
-            z_max (float): Maximum pressure coordinate coefficient
-        """
-        #Distance of CG from keel-WL intersection
-        x_G = L_K - lcg
-
-        #K constant (Eq. 9.63 of Faltinsen 2005)
-        K = (pi / np.sin(pi/180*beta) * gamma(1.5 - beta/180) / (gamma(1 - beta/180)**2 * gamma(0.5 + beta/180)) - 1) / np.tan(pi/180*beta)
-
-        kappa = (1 + z_max) * (pi/180)*(tau + eta_5) #User defined constant
-
-        #Based on Faltinsen's
-        A1_33 = rho * kappa**2 * K * x_s**3 / 3
-        A1_35 = A1_33 * (x_G - x_s * 3/4)
-        A1_53 = A1_35
-        A1_55 = A1_33 * (x_G**2 - 3/2 * x_G * x_s + 3/5 * x_s**2)
-
-        #Contribution from wet-chine region
-        if L_C > 0:
-            C_1 = 2 * np.tan(pi/180*beta)**2 / pi * K
-
-            A2_33 = (rho * b**3) * C_1 * pi / 8 * L_C / b
-            A2_35 = (rho * b**4) * (- C_1 * pi / 16 * ((L_K / b)**2 - (x_s / b)**2) + x_G / b * A2_33 / (rho * b**3))
-            A2_53 = A2_35
-            A2_55 = (rho * b**5) * (C_1 * pi / 24 * ((L_K / b)**3 - (x_s / b)**3) - C_1 / 8 * pi * (x_G / b) * ((L_K / b)**2 - (x_s / b)**2) + (x_G / b)**2 * A2_33 / (rho * b**3))
-        else:
-            A2_33 = 0
-            A2_35 = 0
-            A2_53 = 0
-            A2_55 = 0
-
-        #Total added mass & update values
-        A_33 = A1_33 + A2_33 + W/g # kg, A_33
-        A_35 = A1_35 + A2_35 # kg*m/rad, A_35
-        A_53 = A1_53 + A2_53 # kg*m, A_53
-        A_55 = A1_55 + A2_55 + W/g*r_g**2 # kg*m^2/rad, A_55
-        self.mass_matrix = np.array([[A_33, A_35], [A_53, A_55]])
-    
-    def _calculate_damping_matrix(self, U, rho, b, lcg, tau, beta, g, pi, eta_5, L_K, L_C, lambda_W, x_s, z_max):
-        """Calculate damping matrix coefficients following Sec. 9.4.1 of Faltinsen 2005.
-        
-        Args:
-            U (float): Speed (m/s)
-            rho (float): Water density (kg/m^3)
-            b (float): Beam (m)
-            lcg (float): Longitudinal center of gravity (m)
-            tau (float): Trim angle (deg)
-            beta (float): Deadrise (deg)
-            g (float): Gravitational acceleration (m/s^2)
-            pi (float): Pi constant
-            eta_5 (float): Additional trim (deg)
-            L_K (float): Keel wetted length (m)
-            L_C (float): Chine wetted length (m)
-            lambda_W (float): Mean wetted length-beam ratio
-            x_s (float): Distance to start of wetted chine (m)
-            z_max (float): Maximum pressure coordinate coefficient
-        """
-        #Heave-heave added mass (need to substract W/g since it was added)
-        A_33 = self.mass_matrix[0,0] - self.weight/g
-
-        if L_C > 0:
-            d = 0.5 * b * np.tan(pi/180*beta)
-        else:
-            d = (1 + z_max) * (pi/180)*(tau + eta_5) * L_K
-
-        #K constant (Eq. 9.63 of Faltinsen 2005, P. 369)
-        K = (pi / np.sin(pi/180*beta) * gamma(1.5 - beta/180) / (gamma(1 - beta/180)**2 * gamma(0.5 + beta/180)) - 1) / np.tan(pi/180*beta)
-
-        #2D Added mass coefficient in heave
-        a_33 = rho * d**2 * K
-
-        #Infinite Fn lift coefficient
-        C_L0 = (tau + eta_5)**1.1 * 0.012 * lambda_W**0.5
-
-        #Derivative w.r.t. tau (rad) of inf. Fn C_L0
-        dC_L0 = (180 / pi)**1.1 * 0.0132 * (pi/180*(tau + eta_5))**0.1 * lambda_W**0.5
-
-        #Derivative w.r.t. tau (rad) of inf. Fn C_Lbeta
-        dC_Lbeta = dC_L0 * (1 - 0.0039 * beta * C_L0**-0.4)
-
-        #Damping coefficients & update values
-        B_33 = rho / 2 * U * b**2 * dC_Lbeta # kg/s, B_33, Savitsky based
-        B_35 = - U * (A_33 + lcg * a_33) # kg*m/(s*rad), B_35, Infinite frequency based
-        B_53 = B_33 * (0.75 * lambda_W * b - lcg) # kg*m/s, B_53, Savitsky based
-        B_55 = U * lcg**2 * a_33 # kg*m**2/(s*rad), B_55, Infinite frequency based
-        self.damping_matrix = np.array([[B_33, B_35], [B_53, B_55]])
-    
-    def _calculate_restoring_matrix(self, pi, diffType=1, step=10**-6.6):
-        """Calculate restoring matrix coefficients following the approach in Sec. 9.4.1 of Faltinsen 2005.
-        
-        Args:
-            pi (float): Pi constant
-            diffType (int, optional): 1 (recommended) = Complex step method, 2 = Foward step difference. Defaults to 1.
-            step (float, optional): Step size if using diffType == 2. Defaults to 10**-6.
-        """
-        def _func(eta):
-            self.eta_3 = eta[0] 
-            self.eta_5 = eta[1]
-            self.get_forces() #This needs to run get_geo_lengths() to work
-            return self.net_force[1:3]
-        
-        temp_eta_3 = self.eta_3
-        temp_eta_5 = self.eta_5
-        
-        warnings.filterwarnings("ignore", category=UserWarning)
-        if diffType == 1:
-            C_full = -ndmath.complexGrad(_func, [temp_eta_3, temp_eta_5])
-        elif diffType == 2:
-            C_full = -ndmath.finiteGrad(_func, [temp_eta_3, temp_eta_5], step)
-
-        #Reset values
-        self.eta_3 = temp_eta_3
-        self.eta_5 = temp_eta_5
-        self.get_forces()
-        warnings.filterwarnings("default", category=UserWarning)
-        
-        #Conversion deg to rad (degree in denominator)
-        C_full[0,1] = C_full[0,1] / (pi/180) # N/rad, C_35
-        C_full[1,1] = C_full[1,1] / (pi/180) # N*m/rad, C_55
-        
-        #Update values
-        self.restoring_matrix = C_full
-    
     def get_eom_matrices(self, runGeoLengths=True):
         """This function returns the mass, damping, and stiffness matrices following Faltinsen 2005.
 
@@ -912,6 +807,11 @@ class PlaningBoat():
 
         Args:
             runGeoLengths (boolean, optional): Calculate the wetted lengths before calculating the EOM matrices. Defaults to True.
+
+        Methods:
+            get_mass_matrix(): This function returns the added mass coefficients following Sec. 9.4.1 of Faltinsen 2005, including weight and moment of inertia.
+            get_damping_matrix(): This function returns the damping coefficients following Sec. 9.4.1 of Faltinsen 2005.
+            get_restoring_matrix(diffType=1, step=10**-6.6): This function returns the restoring coefficients following the approach in Sec. 9.4.1 of Faltinsen 2005.
         """
         if runGeoLengths:
             self.get_geo_lengths() #Calculated wetted lengths in get_eom_matrices()
@@ -936,10 +836,117 @@ class PlaningBoat():
         
         pi = np.pi
         
+        def get_mass_matrix():
+            """This function returns the added mass coefficients following Sec. 9.4.1 of Faltinsen 2005, including weight and moment of inertia
+            """
+            
+            #Distance of CG from keel-WL intersection
+            x_G = L_K - lcg
+
+            #K constant (Eq. 9.63 of Faltinsen 2005)
+            K = (pi / np.sin(pi/180*beta) * gamma(1.5 - beta/180) / (gamma(1 - beta/180)**2 * gamma(0.5 + beta/180)) - 1) / np.tan(pi/180*beta)
+
+            kappa = (1 + z_max) * (pi/180)*(tau + eta_5) #User defined constant
+
+            #Based on Faltinsen's
+            A1_33 = rho * kappa**2 * K * x_s**3 / 3
+            A1_35 = A1_33 * (x_G - x_s * 3/4)
+            A1_53 = A1_35
+            A1_55 = A1_33 * (x_G**2 - 3/2 * x_G * x_s + 3/5 * x_s**2)
+
+            #Contribution from wet-chine region
+            if L_C > 0:
+                C_1 = 2 * np.tan(pi/180*beta)**2 / pi * K
+
+                A2_33 = (rho * b**3) * C_1 * pi / 8 * L_C / b
+                A2_35 = (rho * b**4) * (- C_1 * pi / 16 * ((L_K / b)**2 - (x_s / b)**2) + x_G / b * A2_33 / (rho * b**3))
+                A2_53 = A2_35
+                A2_55 = (rho * b**5) * (C_1 * pi / 24 * ((L_K / b)**3 - (x_s / b)**3) - C_1 / 8 * pi * (x_G / b) * ((L_K / b)**2 - (x_s / b)**2) + (x_G / b)**2 * A2_33 / (rho * b**3))
+            else:
+                A2_33 = 0
+                A2_35 = 0
+                A2_53 = 0
+                A2_55 = 0
+
+            #Total added mass & update values
+            A_33 = A1_33 + A2_33 + W/g # kg, A_33
+            A_35 = A1_35 + A2_35 # kg*m/rad, A_35
+            A_53 = A1_53 + A2_53 # kg*m, A_53
+            A_55 = A1_55 + A2_55 + W/g*r_g**2 # kg*m^2/rad, A_55
+            self.mass_matrix = np.array([[A_33, A_35], [A_53, A_55]])
+            
+        def get_damping_matrix():
+            """This function returns the damping coefficients following Sec. 9.4.1 of Faltinsen 2005
+            """
+            #Heave-heave added mass (need to substract W/g since it was added)
+            A_33 = self.mass_matrix[0,0] - W/g
+
+            if L_C > 0:
+                d = 0.5 * b * np.tan(pi/180*beta)
+            else:
+                d = (1 + z_max) * (pi/180)*(tau + eta_5) * L_K
+
+            #K constant (Eq. 9.63 of Faltinsen 2005, P. 369)
+            K = (pi / np.sin(pi/180*beta) * gamma(1.5 - beta/180) / (gamma(1 - beta/180)**2 * gamma(0.5 + beta/180)) - 1) / np.tan(pi/180*beta)
+
+            #2D Added mass coefficient in heave
+            a_33 = rho * d**2 * K
+
+            #Infinite Fn lift coefficient
+            C_L0 = (tau + eta_5)**1.1 * 0.012 * lambda_W**0.5
+
+            #Derivative w.r.t. tau (rad) of inf. Fn C_L0
+            dC_L0 = (180 / pi)**1.1 * 0.0132 * (pi/180*(tau + eta_5))**0.1 * lambda_W**0.5
+
+            #Derivative w.r.t. tau (rad) of inf. Fn C_Lbeta
+            dC_Lbeta = dC_L0 * (1 - 0.0039 * beta * C_L0**-0.4)
+
+            #Damping coefficients & update values
+            B_33 = rho / 2 * U * b**2 * dC_Lbeta # kg/s, B_33, Savitsky based
+            B_35 = - U * (A_33 + lcg * a_33) # kg*m/(s*rad), B_35, Infinite frequency based
+            B_53 = B_33 * (0.75 * lambda_W * b - lcg) # kg*m/s, B_53, Savitsky based
+            B_55 = U * lcg**2 * a_33 # kg*m**2/(s*rad), B_55, Infinite frequency based
+            self.damping_matrix = np.array([[B_33, B_35], [B_53, B_55]])
+            
+        def get_restoring_matrix(diffType=1, step=10**-6.6):
+            """This function returns the restoring coefficients following the approach in Sec. 9.4.1 of Faltinsen 2005
+            
+            Args:
+                diffType (int, optional): 1 (recommended) = Complex step method, 2 = Foward step difference. Defaults to 1.
+                step (float, optional): Step size if using diffType == 2. Defaults to 10**-6.
+            """
+            def _func(eta):
+                self.eta_3 = eta[0] 
+                self.eta_5 = eta[1]
+                self.get_forces() #This needs to run get_geo_lengths() to work
+                return self.net_force[1:3]
+            
+            temp_eta_3 = self.eta_3
+            temp_eta_5 = self.eta_5
+            
+            warnings.filterwarnings("ignore", category=UserWarning)
+            if diffType == 1:
+                C_full = -ndmath.complexGrad(_func, [temp_eta_3, temp_eta_5])
+            elif diffType == 2:
+                C_full = -ndmath.finiteGrad(_func, [temp_eta_3, temp_eta_5], step)
+
+            #Reset values
+            self.eta_3 = temp_eta_3
+            self.eta_5 = temp_eta_5
+            self.get_forces()
+            warnings.filterwarnings("default", category=UserWarning)
+            
+            #Conversion deg to rad (degree in denominator)
+            C_full[0,1] = C_full[0,1] / (pi/180) # N/rad, C_35
+            C_full[1,1] = C_full[1,1] / (pi/180) # N*m/rad, C_55
+            
+            #Update values
+            self.restoring_matrix = C_full
+        
         #Call functions
-        self._calculate_mass_matrix(W, rho, b, lcg, tau, beta, g, r_g, pi, eta_5, L_K, L_C, lambda_W, x_s, z_max)
-        self._calculate_damping_matrix(U, rho, b, lcg, tau, beta, g, pi, eta_5, L_K, L_C, lambda_W, x_s, z_max)
-        self._calculate_restoring_matrix(pi)
+        get_mass_matrix()
+        get_damping_matrix()
+        get_restoring_matrix()
     
     def check_porpoising(self, stepEstimateType=1):
         """This function checks for porpoising.
@@ -1040,10 +1047,16 @@ class PlaningBoat():
         C_Delta = Delta/(w*b**3) #Static beam-loading coefficient
 
         if self.seaway_drag_type == 1: #Savitsky '76
+            # Pre-calculate common terms
+            tan_beta = np.tan(beta*pi/180)
+            tan_beta_cubed = tan_beta**3
+            L_b_ratio = L/b
+            H_sig_b = H_sig/b
+            
             #Check that variables are inside range of applicability (P. 395 of Savitsky & Brown '76)
             P1 = Delta_LT/(0.01*L)**3
-            P2 = L/b
-            P5 = H_sig/b
+            P2 = L_b_ratio
+            P5 = H_sig_b
             P6 = Vk_L
             if P1 < 100 or P1 > 250:
                 warnings.warn('Vessel displacement coefficient = {0:.3f}, outside of range of applicability (100 <= Delta_LT/(0.01*L)^3 <= 250, with units LT/ft^3). Results are extrapolations.'.format(P1), stacklevel=2)
@@ -1058,9 +1071,9 @@ class PlaningBoat():
             if P6 < 2 or P6 > 6:
                 warnings.warn('Speed coefficient = {0:.3f}, outside of range of applicability (2 <= Vk/sqrt(L) <= 6, with units knots/ft^0.5). Results are extrapolations.'.format(P6), stacklevel=2)
                 
-            R_AW_2 = (w*b**3)*66*10**-6*(H_sig/b+0.5)*(L/b)**3/C_Delta+0.0043*(tau-4) #Added resistance at Vk/sqrt(L) = 2
-            R_AW_4 = (Delta)*(0.3*H_sig/b)/(1+2*H_sig/b)*(1.76-tau/6-2*np.tan(beta*pi/180)**3) #Vk/sqrt(L) = 4
-            R_AW_6 = (w*b**3)*(0.158*H_sig/b)/(1+(H_sig/b)*(0.12*beta-21*C_Delta*(5.6-L/b)+7.5*(6-L/b))) #Vk/sqrt(L) = 6
+            R_AW_2 = (w*b**3)*66*10**-6*(H_sig_b+0.5)*L_b_ratio**3/C_Delta+0.0043*(tau-4) #Added resistance at Vk/sqrt(L) = 2
+            R_AW_4 = (Delta)*(0.3*H_sig_b)/(1+2*H_sig_b)*(1.76-tau/6-2*tan_beta_cubed) #Vk/sqrt(L) = 4
+            R_AW_6 = (w*b**3)*(0.158*H_sig_b)/(1+H_sig_b*(0.12*beta-21*C_Delta*(5.6-L_b_ratio)+7.5*(6-L_b_ratio))) #Vk/sqrt(L) = 6
             R_AWs = np.array([R_AW_2, R_AW_4, R_AW_6])
             
             R_AWs_interp = interpolate.interp1d([2,4,6], R_AWs, kind='quadratic', fill_value='extrapolate')
@@ -1138,662 +1151,3 @@ class PlaningBoat():
         #Update values
         self.avg_impact_acc = avg_impact_acc
         self.R_AW = R_AW*4.448 #lbf to N conversion
-
-
-# =============================================================================
-# VIRTUAL PRISMATIC HULL (VPH) METHOD - Ribeiro 2002 Thesis
-# =============================================================================
-# Implements the "Método dos Cascos Prismáticos Virtuais" from Chapter 4 of:
-# RIBEIRO, H.J.C. "Equilíbrio Dinâmico de Cascos Planadores", COPPE/UFRJ, 2002
-# 
-# This method extends Savitsky's approach to handle arbitrary hull forms with
-# variable deadrise angle β(x) and chine line distributions using strip theory.
-# =============================================================================
-
-
-class VirtualPrismaticHull():
-    """Non-prismatic planing hull using Virtual Prismatic Hull (VPH) method
-    
-    This class implements the empirical method from Ribeiro (2002) for computing
-    dynamic equilibrium of planing hulls with arbitrary geometry (variable deadrise,
-    chine distributions, non-prismatic forms). It uses the "Virtual Prismatic Hull"
-    concept where each section is mapped to an equivalent prismatic hull, and a
-    sectional lift distribution is solved via a 4x4 linear system constrained by
-    global force/moment balance.
-    
-    Attributes:
-        speed (float): Speed (m/s). Input parameter.
-        weight (float): Weight (N). Input parameter.
-        loa (float): Length overall (m). Input parameter.
-        beam (float): Maximum beam (m). Input parameter.
-        lcg (float): Longitudinal center of gravity from stern (m). Input parameter.
-        vcg (float): Vertical center of gravity from keel (m). Input parameter.
-        beta_dist (list or callable): Deadrise angle distribution β(x) in degrees.
-            Can be a list of [x, beta] pairs or a function beta(x). Input parameter.
-        chine_dist (list or callable): Chine half-beam distribution b_Q(x) in meters.
-            Can be a list of [x, b_Q] pairs or a function b_Q(x). Input parameter.
-        cl_dist (list or callable): Centerline height distribution CL(x) in meters.
-            Can be a list of [x, CL] pairs or a function CL(x). Input parameter.
-        transom_angle (float): Transom angle δ (deg). Defaults to 0. Input parameter.
-        epsilon (float): Shaft inclination angle ε (deg), positive down. Defaults to 0.
-        ahr (float): Average hull roughness (m). Defaults to 150e-6.
-        rho (float): Water density (kg/m³). Defaults to 1025.87.
-        nu (float): Water kinematic viscosity (m²/s). Defaults to 1.19e-6.
-        g (float): Gravitational acceleration (m/s²). Defaults to 9.8066.
-        n_sections (int): Number of sections for discretization. Defaults to 100.
-        z_wl (float): Static draft at CG (m). Updated by get_steady_trim().
-        tau (float): Dynamic trim angle (deg). Updated by get_steady_trim().
-        L_K (float): Keel wetted length (m). Updated by get_geo_lengths().
-        L_C (float): Mean wetted length (m). Updated by get_geo_lengths().
-        lambda_W (float): Wetted length-to-beam ratio. Updated by get_geo_lengths().
-        lcp (float): Longitudinal center of pressure from stern (m). Updated by get_forces().
-        total_lift (float): Total hydrodynamic + hydrostatic lift (N). Updated by get_forces().
-        skin_friction ((3,) ndarray): Skin friction forces [Fx, Fz, M]. Updated by get_forces().
-        spray_resistance (float): Spray resistance component (N). Updated by get_forces().
-        pressure_resistance (float): Pressure resistance component (N). Updated by get_forces().
-        total_resistance (float): Total resistance (N). Updated by get_forces().
-        validity_flag (bool): True if within applicability limits. Updated by check_validity().
-    """
-    
-    def __init__(self, speed, weight, loa, beam, lcg, vcg, beta_dist, chine_dist=None, 
-                 cl_dist=None, transom_angle=0, epsilon=0, ahr=150e-6, 
-                 rho=1025.87, nu=1.19e-6, g=9.8066, n_sections=100):
-        """Initialize VirtualPrismaticHull
-        
-        Args:
-            speed (float): Speed (m/s).
-            weight (float): Weight (N).
-            loa (float): Length overall (m).
-            beam (float): Maximum beam (m).
-            lcg (float): LCG from stern (m).
-            vcg (float): VCG from keel (m).
-            beta_dist (list/callable): Deadrise distribution β(x) [deg].
-            chine_dist (list/callable, optional): Chine half-beam b_Q(x) [m]. 
-                If None, assumes constant beam = beam/2.
-            cl_dist (list/callable, optional): Centerline height CL(x) [m].
-                If None, assumes flat bottom (CL=0).
-            transom_angle (float, optional): Transom angle δ [deg]. Defaults to 0.
-            epsilon (float, optional): Shaft angle ε [deg], positive down. Defaults to 0.
-            ahr (float, optional): Average hull roughness [m]. Defaults to 150e-6.
-            rho (float, optional): Water density [kg/m³]. Defaults to 1025.87.
-            nu (float, optional): Kinematic viscosity [m²/s]. Defaults to 1.19e-6.
-            g (float, optional): Gravity [m/s²]. Defaults to 9.8066.
-            n_sections (int, optional): Number of sections. Defaults to 100.
-        """
-        self.speed = speed
-        self.weight = weight
-        self.loa = loa
-        self.beam = beam
-        self.lcg = lcg
-        self.vcg = vcg
-        self.beta_dist = beta_dist
-        self.chine_dist = chine_dist if chine_dist is not None else lambda x: beam/2
-        self.cl_dist = cl_dist if cl_dist is not None else lambda x: 0
-        self.transom_angle = transom_angle
-        self.epsilon = epsilon
-        self.ahr = ahr
-        self.rho = rho
-        self.nu = nu
-        self.g = g
-        self.n_sections = n_sections
-        
-        # State variables (updated by methods)
-        self.z_wl = 0
-        self.tau = 5  # Initial guess
-        self.L_K = 0
-        self.L_C = 0
-        self.lambda_W = 0
-        self.lcp = 0
-        self.total_lift = 0
-        self.skin_friction = np.zeros(3)
-        self.spray_resistance = 0
-        self.pressure_resistance = 0
-        self.total_resistance = 0
-        self.validity_flag = True
-        
-        # CPD regression coefficients from Eq. 4-38 (p. 87)
-        self.cpd_coeffs = {
-            'intercept': -0.0632,
-            'Cv': 0.0812,
-            'lambda': 0.187,
-            'tau_deg': -0.0482,
-            'beta_deg': -0.00581
-        }
-        
-        # Validity limits from Table 6-17 (p. 128)
-        self.validity_limits = {
-            'lambda': (1.6, 4.0),
-            'tau_deg': (2.0, 8.0),
-            'beta_deg': (10.0, 30.0),
-            'Cv': (2.0, 4.2)
-        }
-    
-    def _interpolate_distribution(self, dist, x_vals):
-        """Interpolate a distribution (beta, chine, or CL) at given x positions
-        
-        Args:
-            dist: Distribution (list of [x, y] pairs or callable)
-            x_vals: Array of x positions
-            
-        Returns:
-            Interpolated values at x_vals
-        """
-        if callable(dist):
-            return np.array([dist(x) for x in x_vals])
-        elif isinstance(dist, (list, np.ndarray)):
-            dist_arr = np.asarray(dist)
-            f_interp = interpolate.interp1d(dist_arr[:, 0], dist_arr[:, 1], 
-                                           kind='linear', fill_value='extrapolate',
-                                           bounds_error=False)
-            return f_interp(x_vals)
-        else:
-            raise ValueError("Distribution must be callable or list of [x, y] pairs")
-    
-    def _compute_wetted_limits(self, h, tau_deg):
-        """Compute wetted surface boundaries using Wagner's theory (Sec 3.3/3.4)
-        
-        Args:
-            h: Transom immersion (m)
-            tau_deg: Trim angle (deg)
-            
-        Returns:
-            L_K (keel wetted length), Xc (chine immersion point)
-        """
-        tau_rad = np.radians(tau_deg)
-        
-        # Wagner factor π/2 (p. 44)
-        wagner_factor = np.pi / 2
-        
-        # Estimate keel wetted length from transom immersion and trim
-        # L_K ≈ h / sin(τ) for small angles, corrected by Wagner factor
-        if abs(tau_rad) < 1e-6:
-            L_K = self.loa * 0.8  # Fallback for τ → 0
-        else:
-            L_K = min(h / np.sin(tau_rad) * wagner_factor, self.loa)
-        
-        # Chine immersion point (approximate as fraction of L_K)
-        Xc = L_K * 0.9  # Simplified; thesis Sec 3.4 has more detailed treatment
-        
-        return max(L_K, 0.1), max(Xc, 0.1)
-    
-    def _get_sectional_properties(self, x_positions):
-        """Get hull properties at section positions
-        
-        Args:
-            x_positions: Array of longitudinal positions from stern (m)
-            
-        Returns:
-            beta_x, beam_x, cl_x arrays
-        """
-        beta_x = self._interpolate_distribution(self.beta_dist, x_positions)
-        beam_x = 2 * self._interpolate_distribution(self.chine_dist, x_positions)
-        cl_x = self._interpolate_distribution(self.cl_dist, x_positions)
-        return beta_x, beam_x, cl_x
-    
-    def _compute_cpd_regression(self, Cv, lambda_W, tau_deg, beta_deg):
-        """Compute CPD position from Fridsma regression (Eq. 4-38, p. 87)
-        
-        CPD = a0 + a1*Cv + a2*λ + a3*τ + a4*β
-        
-        Returns:
-            Adimensional CPD position (fraction of L_K from stern)
-        """
-        cpd = (self.cpd_coeffs['intercept'] + 
-               self.cpd_coeffs['Cv'] * Cv +
-               self.cpd_coeffs['lambda'] * lambda_W +
-               self.cpd_coeffs['tau_deg'] * tau_deg +
-               self.cpd_coeffs['beta_deg'] * beta_deg)
-        return np.clip(cpd, 0.2, 0.8)  # Sanity bounds
-    
-    def _solve_sectional_lift_distribution(self, x_norm, b_norm, CL_BD, CPD_target, CLR):
-        """Solve 4x4 linear system for CLSp(x) coefficients (Eq. 4-10, 4-11, p. 78)
-        
-        CLSp(x) = a0 + a12*x^(1/2) + a13*x^(1/3) + a1*x
-        
-        Boundary conditions:
-        1. CLSp(0) = 1.0 (stagnation point)
-        2. CLSp(1) = CLR (trailing edge)
-        3. ∫CLSp(x)*b(x)dx = CL_BD (global lift conservation)
-        4. ∫x*CLSp(x)*b(x)dx = CPD (center of pressure position)
-        
-        Args:
-            x_norm: Normalized x positions [0, 1]
-            b_norm: Normalized beam distribution b(x)/B_max
-            CL_BD: Global dynamic lift coefficient (from Savitsky Eq. 2-16)
-            CPD_target: Target CPD position (adimensional)
-            CLR: Trailing edge lift coefficient
-            
-        Returns:
-            coeffs [a0, a12, a13, a1], CLSp values at x_norm
-        """
-        # Build 4x4 system A*a = B
-        # Using numerical integration (trapezoidal rule) for integral constraints
-        
-        n = len(x_norm)
-        dx = x_norm[1] - x_norm[0] if n > 1 else 1.0
-        
-        # Row 1: CLSp(0) = 1.0 => a0 = 1.0
-        row1 = [1.0, 0.0, 0.0, 0.0]
-        B1 = 1.0
-        
-        # Row 2: CLSp(1) = CLR => a0 + a12 + a13 + a1 = CLR
-        row2 = [1.0, 1.0, 1.0, 1.0]
-        B2 = CLR
-        
-        # Rows 3-4: Integral constraints (numerical quadrature)
-        # Compute basis function integrals weighted by b(x)
-        sqrt_x = np.sqrt(x_norm)
-        cbrt_x = np.cbrt(x_norm)
-        
-        # Integral of b(x)*[1, x^0.5, x^(1/3), x] dx
-        int_b = np.trapz(b_norm, x_norm)
-        int_b_sqrt = np.trapz(b_norm * sqrt_x, x_norm)
-        int_b_cbrt = np.trapz(b_norm * cbrt_x, x_norm)
-        int_b_x = np.trapz(b_norm * x_norm, x_norm)
-        
-        # Integral of x*b(x)*[1, x^0.5, x^(1/3), x] dx
-        int_xb = np.trapz(x_norm * b_norm, x_norm)
-        int_xb_sqrt = np.trapz(x_norm * b_norm * sqrt_x, x_norm)
-        int_xb_cbrt = np.trapz(x_norm * b_norm * cbrt_x, x_norm)
-        int_xb_x = np.trapz(x_norm * x_norm * b_norm, x_norm)
-        
-        row3 = [int_b, int_b_sqrt, int_b_cbrt, int_b_x]
-        B3 = CL_BD
-        
-        row4 = [int_xb, int_xb_sqrt, int_xb_cbrt, int_xb_x]
-        B4 = CPD_target * CL_BD  # CPD is moment-weighted
-        
-        A = np.array([row1, row2, row3, row4])
-        B = np.array([B1, B2, B3, B4])
-        
-        # Solve with regularization for ill-conditioned systems
-        try:
-            cond = np.linalg.cond(A)
-            if cond > 1e4:
-                # Tikhonov regularization
-                lambda_reg = 1e-6
-                A = A + lambda_reg * np.eye(4)
-                warnings.warn(f'Ill-conditioned 4x4 system (κ={cond:.2e}). Applied regularization.', stacklevel=2)
-            
-            coeffs = np.linalg.solve(A, B)
-        except np.linalg.LinAlgError:
-            # Fallback to least squares
-            coeffs, _, _, _ = np.linalg.lstsq(A, B, rcond=None)
-            warnings.warn('4x4 system singular. Used least-squares solution.', stacklevel=2)
-        
-        # Evaluate CLSp(x)
-        CLSp = (coeffs[0] + coeffs[1] * sqrt_x + coeffs[2] * cbrt_x + 
-                coeffs[3] * x_norm)
-        
-        # Enforce monotonic decrease (physical constraint)
-        if not np.all(np.diff(CLSp) <= 0):
-            # Apply PCHIP-like monotonicity enforcement
-            CLSp = np.minimum.accumulate(CLSp[::-1])[::-1]
-        
-        return coeffs, CLSp
-    
-    def _compute_savitsky_clbd(self, tau_deg, lambda_W, beta_deg, Cv):
-        """Compute global dynamic lift coefficient using Savitsky Eq. 2-16
-        
-        This is used as input to the VPH method for lift conservation constraint.
-        
-        Returns:
-            CL_BD (dynamic lift coefficient)
-        """
-        tau_rad = np.radians(tau_deg)
-        beta_rad = np.radians(beta_deg)
-        
-        # Savitsky Eq. 2-16 (simplified form)
-        # CL_BD = τ - 0.0065*β*Cλ^(-1/3) / (0.02 + 0.00155*Cλ + 0.00224*Cλ²)
-        # Note: This is approximate; full Savitsky implementation would use tables
-        
-        C_lambda = lambda_W
-        denom = 0.02 + 0.00155*C_lambda + 0.00224*C_lambda**2
-        CL_BD = (tau_rad - 0.0065*beta_rad*C_lambda**(-1/3)) / denom
-        
-        return max(CL_BD, 0.01)  # Sanity bound
-    
-    def _compute_hydrostatic_lift(self, x_positions, h, tau_deg, cl_x, beta_x, beam_x):
-        """Compute hydrostatic lift per section (Eq. 4-41 to 4-44, p. 88-89)
-        
-        Args:
-            x_positions: Section positions from stern (m)
-            h: Transom immersion (m)
-            tau_deg: Trim angle (deg)
-            cl_x: Centerline height at sections (m)
-            beta_x: Deadrise at sections (deg)
-            beam_x: Beam at sections (m)
-            
-        Returns:
-            L_H (total hydrostatic lift), CPH (hydrostatic CP position)
-        """
-        tau_rad = np.radians(tau_deg)
-        L_K = x_positions[-1] - x_positions[0] if len(x_positions) > 1 else 1.0
-        
-        # Flotation line: flut(X) = h - (L_K - X)*tan(τ) (Eq. 4-41)
-        flut_line = h - (L_K - (x_positions - x_positions[0])) * np.tan(tau_rad)
-        
-        # Hydrostatic lift per unit length (Eq. 4-42)
-        # l_H(X) = 0.5*ρ*g*[flut(X) - CL(X)]² / tan(β)
-        draft_local = np.maximum(flut_line - cl_x, 0)
-        beta_rad = np.radians(beta_x)
-        
-        # Avoid division by zero for β → 0
-        tan_beta = np.tan(beta_rad)
-        tan_beta = np.where(np.abs(tan_beta) < 1e-6, 1e-6, tan_beta)
-        
-        l_H = 0.5 * self.rho * self.g * draft_local**2 / tan_beta
-        
-        # Integrate for total hydrostatic lift (Eq. 4-43)
-        L_H = np.trapz(l_H, x_positions)
-        
-        # Compute hydrostatic CP (Eq. 4-44)
-        if L_H > 1e-6:
-            CPH = np.trapz(x_positions * l_H, x_positions) / L_H
-        else:
-            CPH = L_K / 2  # Default to midship
-        
-        return L_H, CPH
-    
-    def get_geo_lengths(self, h=None, tau_deg=None):
-        """Compute geometric quantities (wetted lengths, areas)
-        
-        Args:
-            h: Transom immersion (m). Uses current self.z_wl if None.
-            tau_deg: Trim angle (deg). Uses current self.tau if None.
-            
-        Updates:
-            L_K, L_C, lambda_W
-        """
-        if h is None:
-            h = self.z_wl
-        if tau_deg is None:
-            tau_deg = self.tau
-        
-        L_K, Xc = self._compute_wetted_limits(h, tau_deg)
-        
-        self.L_K = L_K
-        self.L_C = L_K * 0.95  # Approximate mean wetted length
-        self.lambda_W = self.L_C / self.beam
-        
-        return L_K, self.L_C, self.lambda_W
-    
-    def get_forces(self, h=None, tau_deg=None, runGeoLengths=True):
-        """Compute all forces, moments, and resistance components
-        
-        This is the main computational method implementing the VPH algorithm:
-        1. Discretize hull into sections
-        2. Map each section to virtual prismatic hull
-        3. Solve 4x4 system for CLSp(x) distribution
-        4. Integrate dynamic and hydrostatic lift
-        5. Compute resistance components
-        
-        Args:
-            h: Transom immersion (m). Uses self.z_wl if None.
-            tau_deg: Trim angle (deg). Uses self.tau if None.
-            runGeoLengths: Whether to update geometric quantities first.
-            
-        Updates:
-            total_lift, lcp, skin_friction, spray_resistance, 
-            pressure_resistance, total_resistance
-        """
-        if h is None:
-            h = self.z_wl
-        if tau_deg is None:
-            tau_deg = self.tau
-        
-        if runGeoLengths:
-            self.get_geo_lengths(h, tau_deg)
-        
-        L_K = self.L_K
-        tau_rad = np.radians(tau_deg)
-        U = self.speed
-        
-        # Discretize into sections along wetted length
-        x_positions = np.linspace(0, L_K, self.n_sections)
-        x_norm = x_positions / L_K  # Normalized [0, 1]
-        
-        # Get sectional properties
-        beta_x, beam_x, cl_x = self._get_sectional_properties(x_positions)
-        b_norm = beam_x / self.beam
-        
-        # Compute influence parameters
-        Cv = U / np.sqrt(self.g * self.beam)  # Speed coefficient
-        lambda_W = self.lambda_W
-        beta_eff = np.mean(beta_x)  # Effective deadrise for global params
-        
-        # Compute global dynamic lift coefficient (Savitsky Eq. 2-16)
-        CL_BD = self._compute_savitsky_clbd(tau_deg, lambda_W, beta_eff, Cv)
-        
-        # Compute target CPD position (Ribeiro Eq. 4-38)
-        CPD_target = self._compute_cpd_regression(Cv, lambda_W, tau_deg, beta_eff)
-        
-        # Trailing edge lift coefficient (dry transom assumption)
-        # CLR = 1 - (V_R/U)², simplified to 0.3-0.5 for typical planing
-        CLR = 0.4  # Typical value for dry transom at planing speeds
-        
-        # Solve for CLSp(x) distribution
-        coeffs, CLSp = self._solve_sectional_lift_distribution(
-            x_norm, b_norm, CL_BD, CPD_target, CLR
-        )
-        
-        # Compute dynamic lift per unit length (Eq. 4-13)
-        l_D = 0.5 * self.rho * U**2 * beam_x * CLSp
-        
-        # Integrate for total dynamic lift and CP
-        L_D = np.trapz(l_D, x_positions)
-        if L_D > 1e-6:
-            CPD_dim = np.trapz(x_positions * l_D, x_positions) / L_D
-        else:
-            CPD_dim = L_K / 2
-        
-        # Compute hydrostatic lift (Eq. 4-41 to 4-44)
-        L_H, CPH = self._compute_hydrostatic_lift(
-            x_positions, h, tau_deg, cl_x, beta_x, beam_x
-        )
-        
-        # Total lift and CP (Eq. 4-12, 4-15)
-        self.total_lift = L_D + L_H
-        if self.total_lift > 1e-6:
-            self.lcp = (L_D * CPD_dim + L_H * CPH) / self.total_lift
-        else:
-            self.lcp = L_K / 2
-        
-        # Compute resistance components
-        # 1. Friction drag (ITTC-57 line, Eq. 3-28, 3-29)
-        Re = U * L_K / self.nu
-        if Re > 1e5:
-            C_f = 0.075 / (np.log10(Re) - 2)**2  # ITTC-57
-        else:
-            C_f = 1.328 / np.sqrt(Re)  # Laminar
-        
-        # Wetted surface area approximation
-        S_wet = L_K * self.beam * (1 + 0.5 * lambda_W)
-        D_f = 0.5 * self.rho * U**2 * S_wet * C_f
-        
-        # 2. Spray resistance (Eq. 4-25)
-        # Spray area SR approximated from chine wetted length
-        S_R = 0.1 * L_K * self.beam  # Simplified spray area
-        delta_Cf = 0.0  # Roughness increment (can be added)
-        R_spray = 0.5 * self.rho * U**2 * C_f * (1 + delta_Cf) * S_R
-        
-        # 3. Viscous pressure resistance (Eq. 4-27)
-        R_p = self.total_lift * np.sin(tau_rad)
-        
-        # Total resistance
-        self.total_resistance = D_f + R_spray + R_p
-        self.skin_friction = np.array([D_f * np.cos(tau_rad), 
-                                        D_f * np.sin(tau_rad), 
-                                        0])
-        self.spray_resistance = R_spray
-        self.pressure_resistance = R_p
-        
-        # Check validity limits
-        self.check_validity(Cv, lambda_W, tau_deg, beta_eff)
-        
-        return self.total_lift, self.lcp, self.total_resistance
-    
-    def check_validity(self, Cv=None, lambda_W=None, tau_deg=None, beta_deg=None):
-        """Check if current state is within applicability limits (Sec 4.3.5, Table 6-17)
-        
-        Emits warnings if extrapolating beyond validated ranges.
-        """
-        if Cv is None:
-            Cv = self.speed / np.sqrt(self.g * self.beam)
-        if lambda_W is None:
-            lambda_W = self.lambda_W
-        if tau_deg is None:
-            tau_deg = self.tau
-        if beta_deg is None:
-            beta_deg = np.mean(self._interpolate_distribution(
-                self.beta_dist, np.linspace(0, self.L_K, 10)
-            ))
-        
-        self.validity_flag = True
-        warnings_list = []
-        
-        # Check each limit
-        limits = [
-            ('lambda', lambda_W, self.validity_limits['lambda']),
-            ('tau_deg', tau_deg, self.validity_limits['tau_deg']),
-            ('beta_deg', beta_deg, self.validity_limits['beta_deg']),
-            ('Cv', Cv, self.validity_limits['Cv'])
-        ]
-        
-        for name, value, (low, high) in limits:
-            if value < low or value > high:
-                self.validity_flag = False
-                deviation = max(abs(value - low), abs(value - high)) / (high - low) * 100
-                warnings_list.append(
-                    f"{name}={value:.2f} outside [{low}, {high}] "
-                    f"({deviation:.1f}% deviation)"
-                )
-        
-        if warnings_list:
-            warning_msg = "VPH method extrapolating: " + "; ".join(warnings_list)
-            warnings.warn(warning_msg, stacklevel=2)
-        
-        return self.validity_flag
-    
-    def get_steady_trim(self, x0=[0.05, 3], tolF=1e-6, maxiter=50):
-        """Solve for dynamic equilibrium (h, τ) using nonlinear solver
-        
-        Solves the coupled force/moment balance equations (Eq. 4-21, 4-22):
-        R1(h,τ) = AR - BR*tan(ε) - Le = 0
-        R2(h,τ) = Df*f + (AR - BR*tan(ε))*(LCP - LCG) + BR*[(XT - LCP)*tan(ε) + KG] = 0
-        
-        Args:
-            x0: Initial guess [h (m), τ (deg)]. Defaults to [0.05, 3].
-            tolF: Convergence tolerance. Defaults to 1e-6.
-            maxiter: Maximum iterations. Defaults to 50.
-            
-        Updates:
-            z_wl, tau, and all force/moment quantities
-        """
-        from scipy.optimize import root
-        
-        def residuals(x):
-            h, tau_deg = x
-            
-            # Update state temporarily
-            old_z_wl, old_tau = self.z_wl, self.tau
-            self.z_wl, self.tau = h, tau_deg
-            
-            # Compute forces
-            self.get_forces(h, tau_deg, runGeoLengths=True)
-            
-            # Restore state (solver will update if converged)
-            self.z_wl, self.tau = old_z_wl, old_tau
-            
-            # Extract computed values
-            LT = self.total_lift
-            LCP = self.lcp
-            Df = self.skin_friction[0]
-            
-            # Geometric parameters
-            tau_rad = np.radians(tau_deg)
-            eps_rad = np.radians(self.epsilon)
-            KG = self.vcg
-            LCG = self.lcg
-            XT = 0  # Transom at x=0 (stern)
-            
-            # Auxiliary terms (Eq. 4-21 notation)
-            W = self.weight
-            AR = W * np.cos(tau_rad) - Df * np.sin(tau_rad)
-            BR = Df * np.cos(tau_rad) + W * np.sin(tau_rad)
-            
-            # Required lift (Le) - for equilibrium, should equal LT
-            Le = LT
-            
-            # Moment arm f
-            KF = 0  # Simplified; would need thrust application point
-            LCF = 0
-            f = (KF - KG) * np.cos(tau_rad) + (LCF - LCG) * np.sin(tau_rad)
-            
-            # Residuals
-            R1 = AR - BR * np.tan(eps_rad) - Le
-            R2 = Df * f + (AR - BR * np.tan(eps_rad)) * (LCP - LCG) + \
-                 BR * ((XT - LCP) * np.tan(eps_rad) + KG)
-            
-            return [R1, R2]
-        
-        # Solve nonlinear system
-        sol = root(residuals, x0, method='hybr', tol=tolF, 
-                   options={'maxfev': maxiter * 10})
-        
-        if sol.success:
-            self.z_wl, self.tau = sol.x
-            self.get_forces(self.z_wl, self.tau, runGeoLengths=True)
-        else:
-            warnings.warn(f'Equilibrium solver did not converge: {sol.message}', 
-                         stacklevel=2)
-        
-        return self.z_wl, self.tau, sol.success
-    
-    def print_description(self, sigFigs=7):
-        """Print formatted description of vessel and results"""
-        volume = self.weight / (self.g * self.rho)
-        Fn_beam = self.speed / np.sqrt(self.g * self.beam)
-        
-        print("=" * 60)
-        print("VIRTUAL PRISMATIC HULL (VPH) METHOD - Ribeiro 2002")
-        print("=" * 60)
-        print(f"\n---VESSEL GEOMETRY---")
-        print(f"LOA:              {self.loa:.{sigFigs}g} m")
-        print(f"Beam:             {self.beam:.{sigFigs}g} m")
-        print(f"Weight:           {self.weight:.{sigFigs}g} N")
-        print(f"Mass:             {self.weight/self.g:.{sigFigs}g} kg")
-        print(f"Volume:           {volume:.{sigFigs}g} m³")
-        print(f"LCG:              {self.lcg:.{sigFigs}g} m from stern")
-        print(f"VCG:              {self.vcg:.{sigFigs}g} m from keel")
-        print(f"Fn (beam-based):  {Fn_beam:.{sigFigs}g}")
-        
-        print(f"\n---OPERATING CONDITION---")
-        print(f"Speed:            {self.speed:.{sigFigs}g} m/s ({self.speed*1.944:.{sigFigs}g} knots)")
-        print(f"Trim (τ):         {self.tau:.{sigFigs}g} deg")
-        print(f"Transom immers.:  {self.z_wl:.{sigFigs}g} m")
-        
-        print(f"\n---WETTED GEOMETRY---")
-        print(f"L_K (keel):       {self.L_K:.{sigFigs}g} m")
-        print(f"L_C (mean):       {self.L_C:.{sigFigs}g} m")
-        print(f"λ (L/B ratio):    {self.lambda_W:.{sigFigs}g}")
-        
-        print(f"\n---FORCES & MOMENTS---")
-        print(f"Total Lift:       {self.total_lift:.{sigFigs}g} N")
-        print(f"Lift/Weight:      {self.total_lift/self.weight:.{sigFigs}g}")
-        print(f"LCP:              {self.lcp:.{sigFigs}g} m from stern")
-        
-        print(f"\n---RESISTANCE BREAKDOWN---")
-        print(f"Friction:         {self.skin_friction[0]:.{sigFigs}g} N")
-        print(f"Spray:            {self.spray_resistance:.{sigFigs}g} N")
-        print(f"Pressure:         {self.pressure_resistance:.{sigFigs}g} N")
-        print(f"Total R_T:        {self.total_resistance:.{sigFigs}g} N")
-        print(f"L/D Ratio:        {self.total_lift/self.total_resistance:.{sigFigs}g}" if self.total_resistance > 0 else "L/D: N/A")
-        
-        print(f"\n---VALIDITY CHECK---")
-        status = "✓ Within limits" if self.validity_flag else "⚠ EXTRAPOLATING"
-        print(f"Status:           {status}")
-        if not self.validity_flag:
-            self.check_validity()
-        
-        print("=" * 60)
