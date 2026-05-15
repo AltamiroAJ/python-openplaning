@@ -49,7 +49,7 @@ wetted_lengths_type = 3 #1 = Use Faltinsen 2005 wave rise approximation, 2 = Use
 roughness_penalty_type = 2 #1 = Use Mosaad's '86 regression, 2 = Use Townsin's '84 regression. Defaults to 1.
 
 #Create boat object
-boat = PlaningBoat(speed, weight, beam, lcg, vcg, r_g, beta, epsilon, vT, lT, length, H_sig, Lf=Lf, sigma=sigma, delta=delta, wetted_lengths_type=wetted_lengths_type, roughness_penalty_type=roughness_penalty_type)
+boat = PlaningBoat(speed, weight, beam, lcg, vcg, r_g, beta, epsilon, vT, lT, loa=length, H_sig=H_sig, Lf=Lf, sigma=sigma, delta=delta, wetted_lengths_type=wetted_lengths_type, roughness_penalty_type=roughness_penalty_type)
 
 #Calculates the equilibrium trim and heave, and updates boat.tau and boat.z_wl
 boat.get_steady_trim()
@@ -208,6 +208,27 @@ Contributions and feedback are welcome and greatly appreciated. Feel free to ope
 ## Citing
 This package was presented as a conference paper at the SNAME FAST Conference 2021:
 * Castro-Feliciano, E. L., 2021, "OpenPlaning: Open-Source Framework for the Hydrodynamic Design of Planing Hulls," SNAME International Conference on Fast Sea Transportation, Providence, RI
+
+## Changelog
+
+### [0.4.8] - 2026-05-14
+#### Added
+- Implementation of hull equilibrium using Savitsky methods with trim and heave convergence
+- Support for additional wetted length calculation options (Faltinsen 2005, Savitsky '64, Savitsky '76)
+- Roughness penalty calculations using Mosaad '86 and Townsin '84 regressions
+- Seaway behavior estimation with added resistance in waves and impact accelerations
+- Porpoising stability analysis using eigenvalue check and Savitsky chart method
+- Comprehensive documentation via Sphinx and ReadTheDocs integration
+- Test suite for optimization validation
+
+#### Changed
+- Updated `PlaningBoat` constructor to use `loa` parameter name instead of `length` for vessel overall length
+- Improved numerical stability in trim/heave equilibrium solver
+- Enhanced output formatting in `print_description()` method
+
+#### Technical Notes
+- The example in the README now demonstrates the full workflow including `get_steady_trim()` call before `print_description()`
+- Default values for `wetted_lengths_type=1` (Faltinsen 2005) and `roughness_penalty_type=1` (Mosaad '86)
 
 ## References
 * Castro-Feliciano, E. L., Mesa, J., and Daidola J. C., 2024, "Planing Boat Hull Roughness and Its Influence on Performance, Fleet Economics, and Environmental Impact," SNAME Chesapeake Power Boat Symposium, Norfolk, VA
