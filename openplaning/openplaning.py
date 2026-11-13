@@ -3,7 +3,11 @@ from scipy import interpolate, signal
 from scipy.special import gamma
 import ndmath
 import warnings
-import pkg_resources
+from importlib.resources import files as _resource_files
+
+# Package data (tables/*.csv) resolved without pkg_resources, which was removed from
+# setuptools >= 81. Keeps the package importable on modern environments.
+_TABLES_DIR = _resource_files(__package__ or "openplaning") / "tables"
 
 class PlaningBoat():
     """Prismatic planing craft
@@ -1050,16 +1054,16 @@ class PlaningBoat():
                 warnings.warn('Vk_L = {0:.3f}, outside of range of applicability (Vk_L <= 6). Results are extrapolations'.format(Vk_L), stacklevel=2)
 
             #Get data tables (required for when package is distributed)
-            Raw2_tab = pkg_resources.resource_filename(__name__, 'tables\Raw_0.2.csv')
-            Raw4_tab = pkg_resources.resource_filename(__name__, 'tables\Raw_0.4.csv')
-            Raw6_tab = pkg_resources.resource_filename(__name__, 'tables\Raw_0.6.csv')
+            Raw2_tab = str(_TABLES_DIR / 'Raw_0.2.csv')
+            Raw4_tab = str(_TABLES_DIR / 'Raw_0.4.csv')
+            Raw6_tab = str(_TABLES_DIR / 'Raw_0.6.csv')
 
-            V2_tab = pkg_resources.resource_filename(__name__, 'tables\V_0.2.csv')
-            V4_tab = pkg_resources.resource_filename(__name__, 'tables\V_0.4.csv')
+            V2_tab = str(_TABLES_DIR / 'V_0.2.csv')
+            V4_tab = str(_TABLES_DIR / 'V_0.4.csv')
             
-            RawV2_tab = pkg_resources.resource_filename(__name__, 'tables\Raw_V_0.2.csv')
-            RawV4_tab = pkg_resources.resource_filename(__name__, 'tables\Raw_V_0.4.csv')
-            RawV6_tab = pkg_resources.resource_filename(__name__, 'tables\Raw_V_0.6.csv')
+            RawV2_tab = str(_TABLES_DIR / 'Raw_V_0.2.csv')
+            RawV4_tab = str(_TABLES_DIR / 'Raw_V_0.4.csv')
+            RawV6_tab = str(_TABLES_DIR / 'Raw_V_0.6.csv')
 
             #Read values from extracted chart points
             arr_Raw2 = np.genfromtxt(Raw2_tab, delimiter=',', skip_header=1)
