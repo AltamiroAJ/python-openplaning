@@ -153,7 +153,28 @@ class PlaningBoat():
         self.roughness_penalty_type = roughness_penalty_type
 
         self.seaway_drag_type = seaway_drag_type
-        
+
+    def check_mass_properties(self, properties, *, frame_transform=None,
+                              rtol=1e-6, atol=1e-8, lateral_tolerance=1e-6):
+        """Read-only consistency check against calculated rigid-body mass."""
+        from .mass_integration import check_mass_consistency
+        return check_mass_consistency(
+            self, properties, frame_transform=frame_transform,
+            rtol=rtol, atol=atol, lateral_tolerance=lateral_tolerance)
+
+    def set_mass_properties(self, properties, *, frame_transform=None,
+                            rtol=1e-6, atol=1e-8, lateral_tolerance=1e-6):
+        """Attach rigid-body mass only if existing boat inputs agree."""
+        from .mass_integration import bind_mass_properties
+        return bind_mass_properties(
+            self, properties, frame_transform=frame_transform,
+            rtol=rtol, atol=atol, lateral_tolerance=lateral_tolerance)
+
+    def get_mass_properties_snapshot(self):
+        """Obtain checked rigid-body inertia (not hydrodynamic added mass)."""
+        from .mass_integration import get_mass_properties_snapshot
+        return get_mass_properties_snapshot(self)
+
     def print_description(self, sigFigs=7, runAllFunctions=True):
         """Returns a formatted description of the vessel.
         
