@@ -16,6 +16,8 @@ from typing import Iterable
 
 import numpy as np
 
+from .frames import RigidTransform
+
 
 def _vector(value, label: str) -> np.ndarray:
     result = np.asarray(value, dtype=float)
@@ -85,6 +87,19 @@ class MassResult:
     def principal_moments(self) -> np.ndarray:
         return np.linalg.eigvalsh(self.inertia_tensor)
 
+    def transformed(self, transform: RigidTransform) -> "MassResult":
+        """Express the same rigid body in the transform's target frame.
+
+        Inertia remains about the COM; translation changes COM only.
+        """
+        if not isinstance(transform, RigidTransform):
+            raise TypeError("transform must be a RigidTransform")
+        return MassResult(
+            mass=self.mass,
+            center_of_gravity=transform.point(self.center_of_gravity),
+            inertia_tensor=transform.inertia_cg(self.inertia_tensor),
+        )
+
     def inertia_at(self, point: Iterable[float]) -> np.ndarray:
         """Mass inertia about a parallel set of axes through `point` (m)."""
         d = self.center_of_gravity - _vector(point, "point")
@@ -126,6 +141,24 @@ class MassProperties:
         local = (m / 12.0) * np.diag([b*b+c*c, a*a+c*c, a*a+b*b])
         rot = np.eye(3) if rotation is None else _rotation(rotation)
         return self.add_component(MassComponent(m, center, rot @ local @ rot.T, label))
+
+    def transformed(self, transform: RigidTransform) -> "MassProperties":
+        """Return a NEW component collection expressed in the target frame.
+
+        Component CG positions and intrinsic tensors are transformed.
+        The source collection is not modified.
+        """
+        if not isinstance(transform, RigidTransform):
+            raise TypeError("transform must be a RigidTransform")
+        return MassProperties(
+            MassComponent(
+                component.mass,
+                transform.point(component.center),
+                transform.inertia_cg(component.inertia_cg),
+                component.label,
+            )
+            for component in self._components
+        )
 
     def calculate(self) -> MassResult:
         if not self._components:

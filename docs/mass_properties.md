@@ -36,3 +36,10 @@
 From the repository root (Python with numpy installed):
 
 `python -m unittest discover -s tests -p 'test_mass_properties.py' -v`
+
+## Extensão 28B.3
+
+O módulo `openplaning.frames` implementa transformações rígidas entre
+referenciais, e `MassResult.transformed()` / `MassProperties.transformed()`
+permitem aplicar essas transformações aos componentes e resultados. Consulte
+`docs/mass_properties_frames.md`. Esta etapa não modifica `PlaningBoat`.
