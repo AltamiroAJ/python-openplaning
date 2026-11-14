@@ -66,3 +66,19 @@ __all__ += [
     'SourceDecomposition', 'EquilibriumDerivativeTest',
     'decompose_lateral_discrepancy', 'test_equilibrium_derivative',
 ]
+
+# 28C.10: public entry point REQUIRES an explicit source formulation.
+# Historic diagnostic is still available at stability.transverse.from_resolved_planing_boat.
+from .source_variants import (
+    EvidenceLevel, SourceFormulation, SourceResolvedSystem,
+    assemble_lewandowski_2004_tabulated,
+    assemble_lewandowski_1996_full_projection,
+    assert_28c7_reference,
+    from_resolved_planing_boat,
+)
+__all__ += [
+    'EvidenceLevel', 'SourceFormulation', 'SourceResolvedSystem',
+    'assemble_lewandowski_2004_tabulated',
+    'assemble_lewandowski_1996_full_projection',
+    'assert_28c7_reference',
+]
