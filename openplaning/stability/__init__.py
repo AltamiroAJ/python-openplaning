@@ -56,3 +56,13 @@ __all__ += [
 # Read-only source-equation audit; does not change either transverse solver (28C.7).
 from .source_audit import SourceRollAudit, audit_roll_sources
 __all__ += ['SourceRollAudit', 'audit_roll_sources']
+
+# 28C.8: source-definition/equilibrium audit only; does not change solvers.
+from .equilibrium_audit import (
+    SourceDecomposition, EquilibriumDerivativeTest,
+    decompose_lateral_discrepancy, test_equilibrium_derivative,
+)
+__all__ += [
+    'SourceDecomposition', 'EquilibriumDerivativeTest',
+    'decompose_lateral_discrepancy', 'test_equilibrium_derivative',
+]
