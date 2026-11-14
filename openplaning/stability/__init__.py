@@ -22,3 +22,12 @@ __all__ = [
     'TransverseCoefficientState', 'HullDerivatives', 'COEFFICIENT_UNITS',
     'evaluate_hull_derivatives', 'coefficient_state_from_planing_boat',
 ]
+from .transverse import (
+    RigidInertia, LinearTransverseSystem, linearize_transverse_system,
+    assemble_lewandowski_2004, from_resolved_planing_boat,
+)
+
+__all__ += [
+    'RigidInertia', 'LinearTransverseSystem', 'linearize_transverse_system',
+    'assemble_lewandowski_2004', 'from_resolved_planing_boat',
+]
