@@ -41,3 +41,14 @@ __all__ += [
     'FrameResolvedComparison', 'assemble_lewandowski_2004_fsd',
     'from_resolved_planing_boat_fsd', 'compare_legacy_and_fsd',
 ]
+
+
+# Opt-in eigenbranch continuation and Ixz sensitivity (28C.6).
+from .modal_tracking import (
+    ModalSweep, DominanceCrossing, track_oscillatory_modes,
+    sweep_ixz_fsd, refine_dominance_crossings, analyze_ixz_fsd,
+)
+__all__ += [
+    'ModalSweep', 'DominanceCrossing', 'track_oscillatory_modes',
+    'sweep_ixz_fsd', 'refine_dominance_crossings', 'analyze_ixz_fsd',
+]
