@@ -52,3 +52,7 @@ __all__ += [
     'ModalSweep', 'DominanceCrossing', 'track_oscillatory_modes',
     'sweep_ixz_fsd', 'refine_dominance_crossings', 'analyze_ixz_fsd',
 ]
+
+# Read-only source-equation audit; does not change either transverse solver (28C.7).
+from .source_audit import SourceRollAudit, audit_roll_sources
+__all__ += ['SourceRollAudit', 'audit_roll_sources']
