@@ -31,3 +31,13 @@ __all__ += [
     'RigidInertia', 'LinearTransverseSystem', 'linearize_transverse_system',
     'assemble_lewandowski_2004', 'from_resolved_planing_boat',
 ]
+
+# Experimental, opt-in FSD-consistent interpretation (28C.5).
+from .frame_resolved import (
+    FrameResolvedComparison, assemble_lewandowski_2004_fsd,
+    from_resolved_planing_boat_fsd, compare_legacy_and_fsd,
+)
+__all__ += [
+    'FrameResolvedComparison', 'assemble_lewandowski_2004_fsd',
+    'from_resolved_planing_boat_fsd', 'compare_legacy_and_fsd',
+]
